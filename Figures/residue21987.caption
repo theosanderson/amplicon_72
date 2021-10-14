@@ -1,0 +1,1 @@
+G142D is fixed in Delta, with almost all Delta sequences where the nucelotide at position 21987 is known having an A at this position. In contrast Alpha contains the reference G at this position. 35\% of Delta sequences have an N at this position, indicating that the position does not have sequencing coverage.

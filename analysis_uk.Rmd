@@ -1,0 +1,220 @@
+---
+title: "Amplicon 72 Analysis"
+output:
+  pdf_document: default
+  html_notebook: default
+---
+
+
+
+```{r}
+library(tidyverse)
+
+color_ref <- "#1E88E5"
+color_n <- "#B5B3AD"
+color_mut <- "#D81B60"
+
+residues <- read_delim("./residues/uk/residue21987.tsv", delim = " ", col_names = c("sequence_name", "location", "value")) %>%
+  separate(sequence_name, into = c("country", "coguk_id", "year"), sep = "/") %>%
+  rename(res_21987 = value)
+
+residues_21846 <- read_delim("./residues/uk/residue21846.tsv", delim = " ", col_names = c("sequence_name", "location", "value")) %>%
+  separate(sequence_name, into = c("country", "coguk_id", "year"), sep = "/") %>%
+  select(coguk_id, value) %>%
+  rename(residue21846 = value)
+
+
+
+
+metadata <- read_csv("./data/processed_metadata.csv") %>% separate(sequence_name, into = c("country", "coguk_id", "year"), sep = "/")
+
+
+subset_with_ct_data <- read_csv("./data/subset_with_ct_data_and_seqed_at_sanger.csv")
+metadata <- metadata %>% inner_join(subset_with_ct_data)
+
+
+meta_residues <- inner_join(metadata, residues)
+
+everything <- meta_residues
+
+
+everything <- inner_join(everything, residues_21846)
+
+everything <- everything %>% mutate(week = lubridate::floor_date(sample_date, "weeks"))
+```
+
+
+```{r}
+delta <- everything %>%
+  filter(sample_date < "2021-07-01", sample_date > "2021-03-01") %>%
+  filter(scorpio_call == "Delta (B.1.617.2-like)") %>%
+  mutate(has_g142d_call = grepl("G142D", mutations))
+table(delta$has_g142d_call) / nrow(delta)
+
+table(delta$value) / nrow(delta)
+
+apparent_revertants <- delta %>%
+  filter(scorpio_call == "Delta (B.1.617.2-like)") %>%
+  filter(res_21987 == "G")
+res21767 <- read_delim("./residues/uk/residue21767.tsv", delim = " ", col_names = c("sequence_name", "location", "value")) %>%
+  separate(sequence_name, into = c("country", "coguk_id", "year"), sep = "/") %>%
+  mutate(is_revertant = coguk_id %in% apparent_revertants$coguk_id) %>%
+  select(coguk_id, value) %>%
+  rename(res_21767 = value)
+
+together <- inner_join(delta, res21767)
+
+ggplot(together, aes(x = res_21987, fill = res_21767)) +
+  geom_bar(color = "black", position = "stack") +
+  labs(x = "Residue at 21987", fill = "Residue at 21767", y = "Proportion") +
+  theme_bw()
+
+```
+
+
+
+```{r}
+
+
+subset <- together %>%
+  filter(res_21767 %in% c("-", "N", "C"), res_21987 %in%c("A","G","N") )  %>%
+  mutate(res_21767 = case_when(res_21767 == "-" ~ "– (H69/70del)", TRUE ~ res_21767)) %>%
+  mutate(res_21987 = case_when(res_21987 == "A" ~ "A\n(G142D,\n 65%)", res_21987 == "G" ~ "G\n(Ref,\n 0.05%)", res_21987 == "N" ~ "N\n(35%)", TRUE ~ res_21987))
+
+subset %>%
+  group_by(res_21987) %>%
+  summarise(n = n()) %>%
+  mutate(p = (100 * n / sum(n)))
+
+ggplot(subset, aes(x = res_21987, fill = res_21767)) +
+  geom_bar(color = "black", position = "fill") +
+  labs(x = "Residue at 21987", fill = "Residue at 21767", y = "Proportion") +
+  scale_y_continuous(label = scales::percent) +
+  theme_bw() +
+  scale_fill_manual(values = c("C" = "#2393d4", "– (H69/70del)" = "#6dd423", "N" = color_n))
+
+
+
+
+caption <- "Relationship of the residue at 21987 in Delta lineage samples (representing Spike 142) with the residue at 21767 representing Spike 69/70del. Most of the small number of 'revertants' with G at position 21987 also have a gap at 21767, corresponding to the Spike 79/70 deletion found in B.1.1.7. This suggests that these sequences represent contamination from B.1.1.7 (either as a mixed infection or in the laboratory) that is specific to amplicon 72 because of the reduced efficiency of this amplicon in Delta samples."
+
+cat(caption, file = "./Figures/h69.caption", sep = "\n")
+
+ggsave("./Figures/h69.pdf", width = 3.5, height = 3)
+
+```
+```{r}
+
+
+
+ggplot(everything %>% filter(sample_date < "2021-07-01", sample_date > "2021-03-01", scorpio_call %in% c("Delta (B.1.617.2-like)", "Alpha (B.1.1.7-like)"), res_21987 %in% c("G", "A", "N")) %>% mutate(res_21987 = case_when(res_21987 == "A" ~ "A (G142D)", res_21987 == "G" ~ "G (ref)", TRUE ~ res_21987)) %>% mutate(short_lineage = gsub(" \\(.+\\)", "", scorpio_call)), aes(x = short_lineage, fill = res_21987)) +
+  geom_bar(color = "black") +
+  theme_bw() +
+  labs(fill = "Residue 21987", x = "Variant (scorpio call)", y = "Count") +
+  scale_fill_manual(values = c("G (ref)" = color_ref, "A (G142D)" = color_mut, "N" = color_n))
+caption <- "G142D is fixed in Delta, with almost all Delta sequences where the nucelotide at position 21987 is known having an A at this position. In contrast Alpha contains the reference G at this position. 35\\% of Delta sequences have an N at this position, indicating that the position does not have sequencing coverage."
+
+cat(caption, file = "./Figures/residue21987.caption", sep = "\n")
+
+ggsave("./Figures/residue21987.pdf", width = 3.5, height = 3)
+```
+
+
+```{r}
+
+# This file is prefiltered to 2021-03-01 to 2021-07-01, and rows huffled randomly w.r.t. to starting data
+stripped_ct <- read_csv("./data/stripped_ct_data.csv")
+
+ggplot(stripped_ct %>% mutate(short_lineage = gsub(" \\(.+\\)", "", scorpio_call)) %>% filter(short_lineage == "Delta", res_21987 %in% c("N", "A")) %>% mutate(value = case_when(res_21987 == "A" ~ "A (G142D)", TRUE ~ res_21987)), aes(x = floor(Ch1Cq), fill = value)) +
+  geom_bar(color = "black") +
+  theme_bw() +
+  labs(fill = "Residue 21987", x = "ORF1ab Ct value", y = "Count") +
+  facet_wrap(~short_lineage) +
+  coord_cartesian(xlim = c(10, 30)) +
+  theme(legend.position = "bottom") +
+  scale_fill_manual(values = c("G" = color_ref, "A (G142D)" = color_mut, "N" = color_n))
+
+caption <- "Relationship of Ct value and residue at position 21987 for COG-UK Delta samples until 30 June 2021"
+
+cat(caption, file = "Figures/ct.caption", sep = "\n")
+
+ggsave("Figures/ct.pdf", width = 3.5, height = 3)
+
+table(everything$scorpio_call)
+```
+
+```{r}
+common_lineages <- delta %>%
+  group_by(lineage) %>%
+  summarise(n = n()) %>%
+  filter(n > 500)
+
+
+ggplot(delta %>% filter(lineage %in% common_lineages$lineage, residue21846 != "Y", residue21846 != "G", residue21846 != "A") %>% mutate(residue21846 = case_when(residue21846 == "T" ~ "T (T95I)", residue21846 == "C" ~ "C (ref)", TRUE ~ residue21846)) %>% mutate(residue21846 = factor(as.character(residue21846), levels = c("C (ref)", "T (T95I)", "N"))), aes(x = lineage, fill = residue21846)) +
+  geom_bar(color = "black", position = "fill") +
+  theme_bw() +
+  labs(x = "Lineage", fill = "Res. 21846", y = "Proportion") +
+  scale_y_continuous(label = scales::percent) +
+  theme(legend.position = "bottom") +
+  scale_fill_manual(values = c("C (ref)" = "#7c21d0", "T (T95I)" = "#d38d33", "N" = color_n)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+caption <- "Distribution of nucleotides at 21846 (nucleotide T encodes T95I) for different sublineages within Delta. T95I is fixed in AY.4"
+
+cat(caption, file = "./Figures/t95i.caption", sep = "\n")
+
+ggsave("./Figures/t95i.pdf", width = 3.5, height = 3)
+```
+
+
+
+
+```{r}
+library(tidyverse)
+palette <- c("G (ref)" = color_ref, "A (G142D)" = color_mut)
+data <- read_tsv("./data/pileups.tsv", col_names = c("file", "pos", "res", "read_start", "read_end")) %>%
+  filter(res %in% c("G", "A")) %>%
+  mutate(val = case_when(res == "G" ~ "G (ref)", res == "A" ~ "A (G142D)"))
+
+data$is_73LEFT <- case_when(data$read_start > 21960 ~ ">21960", TRUE ~ "<=21960")
+
+unique(data$file)
+p1 <- ggplot(data, aes(color = val, x = read_start, y = read_end)) +
+  geom_jitter(width = 4, height = 4, size = 0.1, alpha = 1) +
+  theme_bw() +
+  labs(color = "Residue at 21987", x = "Read's mapped start", y = "Read's mapped end") +
+  facet_wrap(~ gsub(".bam.sorted.bam", "", file), scales = "free_y") +
+  scale_color_manual(values = palette) +
+  theme(legend.position = "bottom") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+  guides(colour = guide_legend(override.aes = list(size = 4)))
+
+p2 <- ggplot(data, aes(color = val, x = is_73LEFT, fill = val)) +
+  geom_bar(color = "black", position = "stack", width = 0.5) +
+  theme_bw() +
+  labs(color = "Residue at 21987", x = "Read's mapped start", y = "Number of reads") +
+  facet_wrap(~ gsub(".bam.sorted.bam", "", file), scales = "free_y") +
+  scale_fill_manual(values = palette) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+  theme(legend.position = "bottom")
+
+
+p3 <- ggplot(data, aes(color = val, x = is_73LEFT, fill = val)) +
+  geom_bar(color = "black", position = "fill", width = 0.5) +
+  theme_bw() +
+  labs(color = "Residue at 21987", x = "Read's mapped start", y = "Proportion") +
+  facet_wrap(~ gsub(".bam.sorted.bam", "", file), scales = "free_y") +
+  scale_fill_manual(values = palette) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+  scale_y_continuous(labels = scales::percent) +
+  theme(legend.position = "top")
+
+
+
+
+library(ggpubr)
+
+ggarrange(p1, p2, p3, ncol = 1, nrow = 3, common.legend = TRUE, legend = "top", labels = "AUTO")
+ggsave("./Figures/sra.pdf", width = 5, height = 10)
+```
+
