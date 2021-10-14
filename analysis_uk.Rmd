@@ -26,7 +26,7 @@ residues_21846 <- read_delim("./residues/uk/residue21846.tsv", delim = " ", col_
 
 
 
-metadata <- read_csv("./data/processed_metadata.csv") %>% separate(sequence_name, into = c("country", "coguk_id", "year"), sep = "/")
+metadata <- read_csv("./data/processed_metadata.csv.gz") %>% separate(sequence_name, into = c("country", "coguk_id", "year"), sep = "/")
 
 
 subset_with_ct_data <- read_csv("./data/subset_with_ct_data_and_seqed_at_sanger.csv")
@@ -169,7 +169,7 @@ ggsave("./Figures/t95i.pdf", width = 3.5, height = 3)
 
 
 
-```{r}
+```{r, fig.height=12,fig.width=5}
 library(tidyverse)
 palette <- c("G (ref)" = color_ref, "A (G142D)" = color_mut)
 data <- read_tsv("./data/pileups.tsv", col_names = c("file", "pos", "res", "read_start", "read_end")) %>%
